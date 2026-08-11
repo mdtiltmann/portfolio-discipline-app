@@ -77,7 +77,10 @@ export async function POST(req: NextRequest) {
     }
 
     const json = await response.json();
-    const text: string = json.content?.[0]?.text ?? "[]";
+    const textBlock = (json.content ?? []).find(
+      (block: { type?: string; text?: string }) => block?.type === "text"
+    );
+    const text: string = textBlock?.text ?? "[]";
     const cleaned = text.replace(/```json\n?/g, "").replace(/```/g, "").trim();
 
     let items: ExtractedItem[] = [];
