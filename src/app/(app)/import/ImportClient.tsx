@@ -81,18 +81,21 @@ export default function ImportClient({ portfolioId }: { portfolioId: string | nu
     }
     setLoading(true);
     try {
-      const { data: batch } = await supabase
+      const { data: batch, error: batchError } = await supabase
         .from("import_batches")
         .insert({ portfolio_id: portfolioId, status: "confirmed", screenshot_count: files.length, confirmed_at: new Date().toISOString() })
         .select("id")
         .single();
+      if (batchError || !batch?.id) {
+        throw new Error(batchError?.message ?? "Failed to create import batch");
+      }
 
       const holdingsSnapshot: Record<string, unknown>[] = [];
 
       for (const item of items) {
         if (!item.ticker) continue;
-        await supabase.from("import_items").insert({
-          batch_id: batch?.id,
+        const { error: itemError } = await supabase.from("import_items").insert({
+          batch_id: batch.id,
           ticker: item.ticker,
           name: item.name,
           quantity: item.quantity,
@@ -106,6 +109,7 @@ export default function ImportClient({ portfolioId }: { portfolioId: string | nu
           merged_into_ticker: item.sourceCount > 1 ? item.ticker : null,
           raw_json: item,
         });
+        if (itemError) throw new Error(`Saving ${item.ticker}: ${itemError.message}`);
 
         const holdingRow = {
           portfolio_id: portfolioId,
@@ -117,17 +121,24 @@ export default function ImportClient({ portfolioId }: { portfolioId: string | nu
           cost_basis: item.cost_basis ?? null,
         };
 
-        await supabase.from("holdings").upsert(holdingRow, { onConflict: "portfolio_id,ticker" });
+        const { error: holdingError } = await supabase
+          .from("holdings")
+          .upsert(holdingRow, { onConflict: "portfolio_id,ticker" });
+        if (holdingError) throw new Error(`Saving holding ${item.ticker}: ${holdingError.message}`);
         holdingsSnapshot.push(holdingRow);
       }
 
-      await supabase.from("portfolio_snapshots").insert({
-        portfolio_id: portfolioId,
-        snapshot_date: new Date().toISOString().slice(0, 10),
-        total_value: holdingsSnapshot.reduce((s, h) => s + (Number(h.current_value) || 0), 0),
-        holdings_json: holdingsSnapshot,
-        source: "screenshot_import",
-      });
+      const { error: snapshotError } = await supabase.from("portfolio_snapshots").upsert(
+        {
+          portfolio_id: portfolioId,
+          snapshot_date: new Date().toISOString().slice(0, 10),
+          total_value: holdingsSnapshot.reduce((s, h) => s + (Number(h.current_value) || 0), 0),
+          holdings_json: holdingsSnapshot,
+          source: "screenshot_import",
+        },
+        { onConflict: "portfolio_id,snapshot_date" }
+      );
+      if (snapshotError) throw new Error(`Saving snapshot: ${snapshotError.message}`);
 
       router.push("/holdings");
       router.refresh();
