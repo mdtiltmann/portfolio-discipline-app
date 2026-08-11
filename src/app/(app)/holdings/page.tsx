@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/supabase/auth";
 import { loadPortfolioData, computeAllStatuses } from "@/lib/portfolio";
 import { computeTrimAmount } from "@/lib/engine";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
+import ManualHoldingForm from "./ManualHoldingForm";
 
 function statusColor(status: string) {
   switch (status) {
@@ -30,7 +31,9 @@ export default async function HoldingsPage() {
         <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">Holdings</h1>
         <RefreshPricesButton />
       </div>
-      {statuses.length === 0 && <p className="text-sm text-neutral-500">No holdings yet.</p>}
+      <ManualHoldingForm existingTickers={data.holdings.map((h) => h.ticker)} />
+
+      {statuses.length === 0 && <p className="text-sm text-neutral-500">No holdings yet — add one above.</p>}
       {statuses.map(({ holding, status, gain, rationale }) => {
         const gainEur = gain.gainEur;
         const trimAmount =
