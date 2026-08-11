@@ -63,6 +63,10 @@ export default function ImportClient({ portfolioId }: { portfolioId: string | nu
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
   }
 
+  function removeItem(index: number) {
+    setItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
   const pendingReviewCount = useMemo(() => items.filter((it) => !it.reviewed).length, [items]);
   const canConfirm = items.length > 0 && pendingReviewCount === 0;
 
@@ -178,12 +182,22 @@ export default function ImportClient({ portfolioId }: { portfolioId: string | nu
                     : "border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
                 }`}
               >
-                <div className="flex justify-between">
+                <div className="flex items-start justify-between gap-2">
                   <span className="font-medium">{it.ticker ?? "?"}</span>
-                  <span className={`text-xs ${flagged ? "font-semibold text-amber-700 dark:text-amber-400" : "text-neutral-500"}`}>
-                    confidence {it.confidence != null ? Math.round(it.confidence * 100) : "?"}%
-                    {it.valueMismatch && " · value mismatch"}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs ${flagged ? "font-semibold text-amber-700 dark:text-amber-400" : "text-neutral-500"}`}>
+                      confidence {it.confidence != null ? Math.round(it.confidence * 100) : "?"}%
+                      {it.valueMismatch && " · value mismatch"}
+                    </span>
+                    <button
+                      onClick={() => removeItem(i)}
+                      title="Remove this holding from the import"
+                      aria-label={`Remove ${it.ticker ?? "item"}`}
+                      className="rounded-lg border border-neutral-300 px-2 py-0.5 text-xs text-neutral-500 hover:border-red-400 hover:text-red-600 dark:border-neutral-700 dark:hover:border-red-700 dark:hover:text-red-400"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-neutral-500">{it.name}</p>
                 {it.sourceCount > 1 && (
