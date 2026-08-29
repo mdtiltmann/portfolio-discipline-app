@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { usePathname } from "next/navigation";
 
 function SignalsIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -53,27 +52,14 @@ export default function AppShell({
   unreadAlertCount?: number;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const supabase = createClient();
-
-  async function signOut() {
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
 
   return (
     <div className="flex min-h-screen flex-col bg-neutral-50 dark:bg-neutral-950">
-      <header className="flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900">
-            <SignalsIcon width={13} height={13} />
-          </span>
-          <span className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">Signals</span>
-        </div>
-        <button onClick={signOut} className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100">
-          Sign out
-        </button>
+      <header className="flex items-center gap-2 border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900">
+          <SignalsIcon width={13} height={13} />
+        </span>
+        <span className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">Signals</span>
       </header>
 
       <main className="flex-1 overflow-y-auto pb-20">{children}</main>
