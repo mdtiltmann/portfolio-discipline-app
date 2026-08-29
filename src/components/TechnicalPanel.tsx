@@ -37,28 +37,41 @@ interface TechnicalsResponse {
   usedMock?: boolean;
 }
 
+// Keep signals live without the user having to reload the page. 10 minutes
+// is frequent enough to feel "live" against Yahoo's data without hammering
+// their API or Anthropic's news-classification calls across every holding.
+const AUTO_REFRESH_MS = 10 * 60 * 1000;
+
 export default function TechnicalPanel({ ticker }: { ticker: string }) {
   const [interval, setInterval] = useState("1d");
   const [data, setData] = useState<TechnicalsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    async function run() {
-      setLoading(true);
+
+    async function run(isBackground: boolean) {
+      if (!isBackground) setLoading(true);
       try {
         const res = await fetch(`/api/technicals/${encodeURIComponent(ticker)}?interval=${interval}`);
         const json = await res.json();
-        if (!cancelled) setData(json);
+        if (!cancelled) {
+          setData(json);
+          setLastUpdated(new Date());
+        }
       } catch {
         if (!cancelled) setData(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
-    run();
+
+    run(false);
+    const timer = window.setInterval(() => run(true), AUTO_REFRESH_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [ticker, interval]);
 
@@ -103,6 +116,11 @@ export default function TechnicalPanel({ ticker }: { ticker: string }) {
             <p className="mt-2 text-center text-[11px] text-neutral-400">
               Last price: {data.lastPrice.toFixed(2)}
               {data.usedMock ? " (synthetic — live data unavailable)" : ""}
+            </p>
+          )}
+          {lastUpdated && (
+            <p className="text-center text-[10px] text-neutral-400 dark:text-neutral-600">
+              Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · auto-refreshes every 10 min
             </p>
           )}
           {data.error && <p className="mt-1 text-center text-[11px] text-amber-500">{data.error}</p>}
