@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import TechnicalGauge from "./TechnicalGauge";
 
 const TIMEFRAMES: { value: string; label: string }[] = [
@@ -46,51 +46,82 @@ export default function TechnicalPanel({ ticker }: { ticker: string }) {
   const [interval, setInterval] = useState("1d");
   const [data, setData] = useState<TechnicalsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run(isBackground: boolean) {
-      if (!isBackground) setLoading(true);
+  const run = useCallback(
+    async (mode: "initial" | "background" | "manual") => {
+      if (mode === "initial") setLoading(true);
+      if (mode === "manual") setRefreshing(true);
       try {
         const res = await fetch(`/api/technicals/${encodeURIComponent(ticker)}?interval=${interval}`);
         const json = await res.json();
-        if (!cancelled) {
-          setData(json);
-          setLastUpdated(new Date());
-        }
+        setData(json);
+        setLastUpdated(new Date());
       } catch {
-        if (!cancelled) setData(null);
+        setData(null);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
-    }
+    },
+    [ticker, interval]
+  );
 
-    run(false);
-    const timer = window.setInterval(() => run(true), AUTO_REFRESH_MS);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!cancelled) await run("initial");
+    })();
+    const timer = window.setInterval(() => {
+      if (!cancelled) run("background");
+    }, AUTO_REFRESH_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [ticker, interval]);
+  }, [run]);
 
   return (
     <div>
-      <div className="-mx-1 flex gap-1 overflow-x-auto pb-2">
-        {TIMEFRAMES.map((tf) => (
-          <button
-            key={tf.value}
-            onClick={() => setInterval(tf.value)}
-            className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
-              interval === tf.value
-                ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
-            }`}
+      <div className="flex items-center gap-2">
+        <div className="-mx-1 flex flex-1 gap-1 overflow-x-auto pb-2">
+          {TIMEFRAMES.map((tf) => (
+            <button
+              key={tf.value}
+              onClick={() => setInterval(tf.value)}
+              className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                interval === tf.value
+                  ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                  : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+              }`}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => run("manual")}
+          disabled={refreshing || loading}
+          title="Refresh now"
+          aria-label="Refresh technicals"
+          className="mb-2 shrink-0 rounded-full border border-neutral-300 p-1.5 text-neutral-500 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-400"
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={refreshing ? "animate-spin" : ""}
           >
-            {tf.label}
-          </button>
-        ))}
+            <path d="M21 12a9 9 0 1 1-3-6.7" />
+            <path d="M21 3v6h-6" />
+          </svg>
+        </button>
       </div>
 
       {loading && <p className="py-6 text-center text-xs text-neutral-400">Loading technicals…</p>}

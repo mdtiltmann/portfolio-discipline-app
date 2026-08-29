@@ -13,6 +13,11 @@ export const DEFAULT_YAHOO_SYMBOL_OVERRIDES: Record<string, string> = {
   EMIM: "EMIM.L",
   IITU: "IITU.L",
   SGLN: "SGLN.L",
+  // Airbus SE trades on Euronext Paris as AIR.PA. The bare "AIR" ticker on
+  // Yahoo resolves to a different NYSE-listed company (AAR Corp) entirely —
+  // without this override, news/price lookups would silently fetch the
+  // wrong company's data.
+  AIR: "AIR.PA",
 };
 
 /**
