@@ -335,6 +335,20 @@ export const DEFAULT_VERDICT_THRESHOLDS: VerdictThresholds = {
   buyMax: BUY_MAX,
 };
 
+// Buckets a raw ratio in [-1, 1] (typically (buy - sell) / total, optionally
+// nudged by news sentiment — see newsNudge.ts) into a 5-way verdict. Shared
+// by verdictFromCounts below and by the news-nudge re-bucketing path.
+export function verdictFromRatio(
+  ratio: number,
+  thresholds: VerdictThresholds = DEFAULT_VERDICT_THRESHOLDS
+): Verdict {
+  if (ratio <= thresholds.strongSellMax) return "Strong Sell";
+  if (ratio <= thresholds.sellMax) return "Sell";
+  if (ratio < thresholds.neutralMax) return "Neutral";
+  if (ratio < thresholds.buyMax) return "Buy";
+  return "Strong Buy";
+}
+
 export function verdictFromCounts(
   buy: number,
   sell: number,
@@ -344,11 +358,7 @@ export function verdictFromCounts(
   const total = buy + sell + neutral;
   if (total === 0) return "Neutral";
   const ratio = (buy - sell) / total;
-  if (ratio <= thresholds.strongSellMax) return "Strong Sell";
-  if (ratio <= thresholds.sellMax) return "Sell";
-  if (ratio < thresholds.neutralMax) return "Neutral";
-  if (ratio < thresholds.buyMax) return "Buy";
-  return "Strong Buy";
+  return verdictFromRatio(ratio, thresholds);
 }
 
 function toPanel(indicators: IndicatorResult[], thresholds: VerdictThresholds): PanelResult {

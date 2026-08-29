@@ -23,10 +23,15 @@ interface Panel {
   verdict: string;
 }
 
+interface SummaryPanel extends Panel {
+  newsAdjustedVerdict?: string;
+  newsNudgeApplied?: number;
+}
+
 interface TechnicalsResponse {
   movingAverages: Panel;
   oscillators: Panel;
-  summary: Panel;
+  summary: SummaryPanel;
   lastPrice: number | null;
   error?: string;
   usedMock?: boolean;
@@ -85,7 +90,13 @@ export default function TechnicalPanel({ ticker }: { ticker: string }) {
         <>
           <div className="grid grid-cols-3 items-start gap-1.5 pt-2 sm:gap-3">
             <TechnicalGauge label="Oscillators" size="sm" {...data.oscillators} />
-            <TechnicalGauge label="Summary" size="lg" {...data.summary} />
+            <TechnicalGauge
+              label="Summary"
+              size="lg"
+              {...data.summary}
+              verdict={data.summary.newsAdjustedVerdict ?? data.summary.verdict}
+              technicalVerdict={data.summary.verdict}
+            />
             <TechnicalGauge label="Moving Averages" size="sm" {...data.movingAverages} />
           </div>
           {data.lastPrice != null && (

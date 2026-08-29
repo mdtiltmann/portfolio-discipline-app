@@ -41,9 +41,19 @@ export interface TechnicalGaugeProps {
   neutral: number;
   verdict: string;
   size?: "sm" | "lg";
+  /** When set and different from `verdict`, shown as a small note (e.g. "News-adjusted (was Buy)"). */
+  technicalVerdict?: string;
 }
 
-export default function TechnicalGauge({ label, buy, sell, neutral, verdict, size = "sm" }: TechnicalGaugeProps) {
+export default function TechnicalGauge({
+  label,
+  buy,
+  sell,
+  neutral,
+  verdict,
+  size = "sm",
+  technicalVerdict,
+}: TechnicalGaugeProps) {
   const gradientId = useId();
   const total = buy + sell + neutral;
   const ratio = total > 0 ? (buy - sell) / total : 0; // [-1, 1]
@@ -100,6 +110,9 @@ export default function TechnicalGauge({ label, buy, sell, neutral, verdict, siz
         <circle cx={cx} cy={cy} r={3.5} className="fill-neutral-700 dark:fill-neutral-200" />
       </svg>
       <p className={`-mt-0.5 text-sm font-semibold ${verdictColor}`}>{verdict}</p>
+      {technicalVerdict && technicalVerdict !== verdict && (
+        <p className="text-[10px] text-neutral-400 dark:text-neutral-500">News-adjusted (was {technicalVerdict})</p>
+      )}
       <div className="mt-2.5 grid grid-cols-3 gap-x-4 text-center text-[10px]">
         <div>
           <p className="font-semibold text-red-500 dark:text-red-400">{sell}</p>

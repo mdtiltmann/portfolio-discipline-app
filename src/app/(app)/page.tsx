@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/supabase/auth";
 import { loadPortfolioData } from "@/lib/portfolio";
 import Link from "next/link";
 import TechnicalPanel from "@/components/TechnicalPanel";
+import PushNotificationToggle from "@/components/PushNotificationToggle";
 
 export default async function SignalsPage() {
   const user = await requireUser();
@@ -27,6 +28,8 @@ export default async function SignalsPage() {
         Technical signals are computed from public price data using standard formulas — informational only, not
         financial advice.
       </p>
+
+      <PushNotificationToggle />
 
       {holdings.length === 0 && (
         <div className="rounded-xl border border-neutral-200 bg-white p-5 text-center text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900">
