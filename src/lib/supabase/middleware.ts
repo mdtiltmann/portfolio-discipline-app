@@ -33,16 +33,10 @@ export async function updateSession(request: NextRequest) {
   // Anyone who can reach this URL is treated as that user — there is no
   // further access gate, by the owner's explicit choice.
   if (!user && process.env.SITE_AUTH_EMAIL && process.env.SITE_AUTH_PASSWORD) {
-    const result = await supabase.auth.signInWithPassword({
+    await supabase.auth.signInWithPassword({
       email: process.env.SITE_AUTH_EMAIL,
       password: process.env.SITE_AUTH_PASSWORD,
     });
-    supabaseResponse.headers.set("x-auto-login-debug", result.error ? `error:${result.error.message}` : `ok:${!!result.data.user}`);
-  } else if (!user) {
-    supabaseResponse.headers.set(
-      "x-auto-login-debug",
-      `skipped-no-env:email=${!!process.env.SITE_AUTH_EMAIL},password=${!!process.env.SITE_AUTH_PASSWORD}`
-    );
   }
 
   return supabaseResponse;
