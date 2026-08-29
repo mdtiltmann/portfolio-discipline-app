@@ -1,6 +1,8 @@
 import { requireUser } from "@/lib/supabase/auth";
-import { loadPortfolioData, computeAllStatuses } from "@/lib/portfolio";
+import { loadPortfolioData } from "@/lib/portfolio";
 import { createClient } from "@/lib/supabase/server";
+import { fetchCandles, generateMockCandles } from "@/lib/marketdata/provider";
+import { computeTechnicalSummary } from "@/lib/technicals";
 import NewsRefreshButton from "./NewsRefreshButton";
 
 interface NewsRow {
@@ -28,27 +30,32 @@ const SENTIMENT_LABEL: Record<string, string> = {
   negative: "Negative",
 };
 
-function rulesEngineNote(ticker: string, statuses: ReturnType<typeof computeAllStatuses>): string {
-  const match = statuses.find((s) => s.holding.ticker.toUpperCase() === ticker.toUpperCase());
-  if (!match) return "This ticker isn't currently held — no allocation rule applies.";
+interface TickerSignal {
+  verdict: string;
+  buy: number;
+  neutral: number;
+  sell: number;
+}
 
-  const { status } = match;
-  if (status.status === "TRIM") {
-    return `${ticker} is already ${status.currentPct.toFixed(1)}% of your portfolio. Your concentration rule already suggests trimming — this news doesn't change that, it's just context.`;
+async function computeSignalForTicker(ticker: string): Promise<TickerSignal | null> {
+  try {
+    let candles = await fetchCandles(ticker, "1d");
+    if (candles.length < 30) candles = generateMockCandles(ticker);
+    const { summary } = computeTechnicalSummary(candles);
+    return { verdict: summary.verdict, buy: summary.buy, neutral: summary.neutral, sell: summary.sell };
+  } catch {
+    return null;
   }
-  if (status.status === "STOP_ADDING") {
-    return `${ticker} is ${status.currentPct.toFixed(1)}% of your portfolio, at the stop-adding threshold. No new buys suggested regardless of this news.`;
-  }
-  if (status.status === "REVIEW") {
-    return `${ticker} is flagged for manual review by the rules engine independent of this news.`;
-  }
-  return `${ticker} is ${status.currentPct.toFixed(1)}% of your portfolio, within target — no action suggested by your rules based on this news.`;
+}
+
+function technicalNote(ticker: string, signal: TickerSignal | null): string {
+  if (!signal) return `Current technical signal for ${ticker} is unavailable right now.`;
+  return `Current technical signal: ${signal.verdict} (${signal.buy} Buy / ${signal.neutral} Neutral / ${signal.sell} Sell).`;
 }
 
 export default async function NewsPage() {
   const user = await requireUser();
   const data = await loadPortfolioData(user.id);
-  const statuses = computeAllStatuses(data);
   const supabase = await createClient();
 
   const heldTickers = data.holdings.map((h) => h.ticker.toUpperCase());
@@ -60,6 +67,20 @@ export default async function NewsPage() {
     .limit(100);
 
   const items = (rows ?? []) as NewsRow[];
+
+  // Compute a technical signal once per distinct held ticker referenced by
+  // the news feed (not for every headline) to keep this cheap.
+  const tickersNeedingSignal = Array.from(
+    new Set(
+      items
+        .map((i) => i.ticker?.toUpperCase())
+        .filter((t): t is string => !!t && heldTickers.includes(t))
+    )
+  );
+  const signalEntries = await Promise.all(
+    tickersNeedingSignal.map(async (t) => [t, await computeSignalForTicker(t)] as const)
+  );
+  const signalByTicker = new Map(signalEntries);
   const groups: Array<{ key: string; label: string }> = [
     { key: "material", label: "Material" },
     { key: "worth_watching", label: "Worth watching" },
@@ -73,8 +94,9 @@ export default async function NewsPage() {
         <NewsRefreshButton />
       </div>
       <p className="text-xs text-neutral-500">
-        News is informational only — it never triggers a sell or trim directly. Each item is shown alongside your
-        existing rules-engine status for that ticker.
+        News is informational only — it never triggers a signal directly. Each item for a ticker you hold is shown
+        alongside that ticker&apos;s current technical signal, computed from public price data using standard
+        formulas. Not financial advice.
       </p>
 
       {items.length === 0 && (
@@ -121,7 +143,7 @@ export default async function NewsPage() {
                     {item.summary && <p className="mt-1 text-xs opacity-80">{item.summary}</p>}
                     {isHeld && item.ticker && (
                       <p className="mt-2 rounded-lg bg-white/70 p-2 text-xs text-neutral-700 dark:bg-black/20 dark:text-neutral-300">
-                        {rulesEngineNote(item.ticker, statuses)}
+                        {technicalNote(item.ticker, signalByTicker.get(item.ticker.toUpperCase()) ?? null)}
                       </p>
                     )}
                   </div>

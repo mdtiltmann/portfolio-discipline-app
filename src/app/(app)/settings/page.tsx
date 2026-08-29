@@ -145,9 +145,42 @@ async function updateContributionSchedule(formData: FormData) {
   revalidatePath("/contribute");
 }
 
+async function updateVerdictThresholds(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const supabase = await createClient();
+
+  const verdict_thresholds = {
+    strongSellMax: Number(formData.get("strongSellMax")) || -0.5,
+    sellMax: Number(formData.get("sellMax")) || -0.1,
+    neutralMax: Number(formData.get("neutralMax")) || 0.1,
+    buyMax: Number(formData.get("buyMax")) || 0.5,
+  };
+
+  await supabase.from("settings").upsert(
+    { user_id: user.id, verdict_thresholds },
+    { onConflict: "user_id" }
+  );
+
+  revalidatePath("/settings");
+  revalidatePath("/");
+}
+
 export default async function SettingsPage() {
   const user = await requireUser();
   const data = await loadPortfolioData(user.id);
+  const supabase = await createClient();
+  const { data: settingsRow } = await supabase
+    .from("settings")
+    .select("verdict_thresholds")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const thresholds = settingsRow?.verdict_thresholds ?? {
+    strongSellMax: -0.5,
+    sellMax: -0.1,
+    neutralMax: 0.1,
+    buyMax: 0.5,
+  };
 
   const limits = data.settings.risk_limits;
 
@@ -172,6 +205,71 @@ export default async function SettingsPage() {
             className="w-full rounded-xl bg-emerald-700 px-4 py-3 text-sm font-medium text-white hover:bg-emerald-800"
           >
             Load sample data
+          </button>
+        </form>
+      </section>
+
+      <section className="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+        <h2 className="mb-1 text-sm font-semibold">Signal thresholds</h2>
+        <p className="mb-3 text-xs text-neutral-500">
+          Controls how the Buy/Sell/Neutral gauges turn indicator votes into a verdict. The ratio is
+          (buy votes − sell votes) / total votes, from −1 (all sell) to +1 (all buy). Tune these if the
+          gauge feels too eager or too cautious once you&apos;ve watched it against real outcomes.
+        </p>
+        <form action={updateVerdictThresholds} className="grid grid-cols-2 gap-2 text-sm">
+          <label className="block">
+            Strong Sell at or below
+            <input
+              type="number"
+              step="0.01"
+              min="-1"
+              max="0"
+              name="strongSellMax"
+              defaultValue={thresholds.strongSellMax}
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-2 py-1.5 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+          <label className="block">
+            Sell at or below
+            <input
+              type="number"
+              step="0.01"
+              min="-1"
+              max="0"
+              name="sellMax"
+              defaultValue={thresholds.sellMax}
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-2 py-1.5 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+          <label className="block">
+            Neutral below
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              name="neutralMax"
+              defaultValue={thresholds.neutralMax}
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-2 py-1.5 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+          <label className="block">
+            Buy below (else Strong Buy)
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              name="buyMax"
+              defaultValue={thresholds.buyMax}
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-2 py-1.5 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+          </label>
+          <button
+            type="submit"
+            className="col-span-2 mt-1 w-full rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900"
+          >
+            Save thresholds
           </button>
         </form>
       </section>
