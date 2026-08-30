@@ -42,6 +42,7 @@ export async function upsertHolding(formData: FormData): Promise<UpsertHoldingRe
   const currentValue = Number(formData.get("current_value") ?? 0) || 0;
   const costBasisRaw = formData.get("cost_basis");
   const costBasis = costBasisRaw && String(costBasisRaw).trim() !== "" ? Number(costBasisRaw) : null;
+  const yahooSymbol = String(formData.get("yahoo_symbol") ?? "").trim() || null;
 
   try {
     const portfolioId = await ensurePortfolioId(user.id);
@@ -59,6 +60,17 @@ export async function upsertHolding(formData: FormData): Promise<UpsertHoldingRe
       { onConflict: "portfolio_id,ticker" }
     );
     if (error) throw new Error(error.message);
+
+    // Record the exact Yahoo symbol the user picked from search (if any) so
+    // price/technicals/news lookups use it directly instead of guessing —
+    // this is what avoids picking up an unrelated company that happens to
+    // share the same bare ticker (e.g. "AIR" resolving to AAR Corp instead
+    // of Airbus SE).
+    if (yahooSymbol) {
+      await supabase
+        .from("asset_metadata")
+        .upsert({ ticker, name, asset_class: assetClass, yahoo_symbol: yahooSymbol }, { onConflict: "ticker" });
+    }
 
     revalidatePath("/holdings");
     revalidatePath("/");
