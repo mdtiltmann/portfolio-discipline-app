@@ -4,13 +4,18 @@ import {
   computeGainSignal,
   buildRationale,
   computeRiskAlerts,
+  computeAnnualizedVolatility,
+  RISK_PROFILES,
   DEFAULT_RISK_LIMITS,
+  DEFAULT_RISK_PROFILE,
   type Holding,
   type AssetRule,
   type AllocationTarget,
   type Settings,
   type ContributionSchedule,
+  type RiskContext,
 } from "@/lib/engine";
+import { fetchCandles } from "@/lib/marketdata/provider";
 
 export interface PortfolioData {
   userId: string;
@@ -75,6 +80,58 @@ export function computeAllStatuses(data: PortfolioData) {
     const gain = computeGainSignal(h, data.rules);
     const rationale = buildRationale(status, gain);
     return { holding: h, status, gain, rationale };
+  });
+}
+
+/**
+ * Same as computeAllStatuses, but for individual stocks and sector ETFs
+ * (where single-name volatility genuinely matters for position sizing) it
+ * fetches real price history and volatility-adjusts the target/trim bands
+ * per the user's risk profile, using the "5/25 rule" for when drift from
+ * that target actually warrants action — see src/lib/engine/riskProfile.ts.
+ * Broad core ETFs and defensive/cash holdings are unaffected: they stay
+ * pure allocation-band, as before.
+ *
+ * Best-effort: a candle-fetch failure for any ticker just falls back to the
+ * unadjusted static thresholds for that holding rather than failing the
+ * whole page.
+ */
+export async function computeAllStatusesWithRisk(data: PortfolioData) {
+  const supabase = await createClient();
+  const riskAdjustableTickers = data.holdings
+    .filter((h) => h.asset_class === "individual_stock" || h.asset_class === "sector_etf")
+    .map((h) => h.ticker.toUpperCase());
+
+  const riskContextByTicker = new Map<string, RiskContext>();
+
+  if (riskAdjustableTickers.length > 0) {
+    const profile = RISK_PROFILES[data.settings.risk_profile ?? DEFAULT_RISK_PROFILE];
+    const { data: metaRows } = await supabase
+      .from("asset_metadata")
+      .select("ticker, yahoo_symbol")
+      .in("ticker", riskAdjustableTickers);
+    const overrideByTicker = new Map((metaRows ?? []).map((r) => [r.ticker.toUpperCase(), r.yahoo_symbol]));
+
+    await Promise.all(
+      riskAdjustableTickers.map(async (ticker) => {
+        try {
+          const candles = await fetchCandles(ticker, "1d", overrideByTicker.get(ticker));
+          const volatility = computeAnnualizedVolatility(candles);
+          riskContextByTicker.set(ticker, { volatility, profile });
+        } catch {
+          // No candles available — leave unset, computeHoldingStatus falls
+          // back to the static default thresholds for this holding.
+        }
+      })
+    );
+  }
+
+  return data.holdings.map((h) => {
+    const riskContext = riskContextByTicker.get(h.ticker.toUpperCase());
+    const status = computeHoldingStatus(h, data.totalValue, data.rules, data.settings, riskContext);
+    const gain = computeGainSignal(h, data.rules);
+    const rationale = buildRationale(status, gain);
+    return { holding: h, status, gain, rationale, volatility: riskContext?.volatility ?? null };
   });
 }
 

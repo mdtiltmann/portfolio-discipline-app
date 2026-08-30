@@ -1,4 +1,4 @@
-import { resolveThresholds } from "./thresholds";
+import { resolveThresholds, type RiskContext } from "./thresholds";
 import type {
   AssetRule,
   Holding,
@@ -18,12 +18,13 @@ export function computeHoldingStatus(
   // Settings currently only feeds through hardcoded/rule-based thresholds above;
   // accepted here so callers can pass it uniformly and future settings-driven
   // overrides (e.g. per-user default bands) have a stable call site to extend.
-  settings: Settings | null | undefined
+  settings: Settings | null | undefined,
+  riskContext?: RiskContext
 ): HoldingStatus {
   void settings;
   const currentValue = holding.current_value;
   const currentPct = portfolioTotalValue > 0 ? (currentValue / portfolioTotalValue) * 100 : 0;
-  const t = resolveThresholds(holding.ticker, holding.asset_class, rules);
+  const t = resolveThresholds(holding.ticker, holding.asset_class, rules, undefined, riskContext);
 
   let status: HoldingStatus["status"] = "HOLD";
   let rationale = "";
@@ -33,9 +34,11 @@ export function computeHoldingStatus(
 
   if (holding.asset_class === "individual_stock") {
     const stopAdding = t.stopAddingPct ?? 5;
-    const warning = t.warningPct ?? 5;
     const trimAt = t.trimPct ?? 8;
-    const reviewAt = warning + 2; // 7-8% review band by default
+    // Scales with the actual stop-adding-to-trim band width (static or
+    // volatility-adjusted) instead of a fixed +2pp, so REVIEW means "60% of
+    // the way through the band" regardless of where that band sits.
+    const reviewAt = stopAdding + (trimAt - stopAdding) * 0.6;
     if (currentPct < stopAdding) {
       status = "BUY";
       rationale = `${holding.ticker} is ${currentPct.toFixed(1)}% of the portfolio, below the ${stopAdding}% stop-adding line — fine to continue contributions here.`;

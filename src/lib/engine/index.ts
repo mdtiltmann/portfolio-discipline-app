@@ -1,5 +1,7 @@
 export * from "./types";
 export * from "./classification";
+export * from "./riskProfile";
+export * from "./volatility";
 export * from "./thresholds";
 export * from "./allocationStatus";
 export * from "./gainTriggers";

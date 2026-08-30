@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/supabase/auth";
-import { loadPortfolioData, computeAllStatuses } from "@/lib/portfolio";
-import { computeTrimAmount } from "@/lib/engine";
+import { loadPortfolioData, computeAllStatusesWithRisk } from "@/lib/portfolio";
+import { computeTrimAmount, DEFAULT_RISK_PROFILE } from "@/lib/engine";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
 import ManualHoldingForm from "./ManualHoldingForm";
 
@@ -23,7 +23,8 @@ function statusColor(status: string) {
 export default async function HoldingsPage() {
   const user = await requireUser();
   const data = await loadPortfolioData(user.id);
-  const statuses = computeAllStatuses(data);
+  const statuses = await computeAllStatusesWithRisk(data);
+  const profileName = data.settings.risk_profile ?? DEFAULT_RISK_PROFILE;
 
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-4">
@@ -33,8 +34,16 @@ export default async function HoldingsPage() {
       </div>
       <ManualHoldingForm existingTickers={data.holdings.map((h) => h.ticker)} />
 
+      <p className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-[11px] leading-relaxed text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/60 dark:text-neutral-400">
+        Status here is about <strong>position sizing</strong>, not price direction — how much of your total portfolio
+        this holding represents versus a target weight. For stocks and sector ETFs, that target is volatility-adjusted
+        (a shakier holding gets a smaller target) and the trim trigger uses the 5/25 rebalance-band rule, under your{" "}
+        <strong>{profileName}</strong> risk profile (change it in Settings). This is separate from the technical
+        Buy/Sell signals on the Signals screen.
+      </p>
+
       {statuses.length === 0 && <p className="text-sm text-neutral-500">No holdings yet — add one above.</p>}
-      {statuses.map(({ holding, status, gain, rationale }) => {
+      {statuses.map(({ holding, status, gain, rationale, volatility }) => {
         const gainEur = gain.gainEur;
         const trimAmount =
           status.status === "TRIM" && status.targetPct != null
@@ -63,9 +72,15 @@ export default async function HoldingsPage() {
                 {status.targetPct != null
                   ? `${status.targetPct.toFixed(1)}%`
                   : status.targetMinPct != null
-                  ? `${status.targetMinPct}-${status.targetMaxPct}%`
+                  ? `${status.targetMinPct.toFixed(1)}-${status.targetMaxPct?.toFixed(1)}%`
                   : "—"}
               </span>
+              {volatility != null && (
+                <>
+                  <span>Annualized volatility</span>
+                  <span className="text-right font-medium">{(volatility * 100).toFixed(0)}%</span>
+                </>
+              )}
               <span>Gain</span>
               <span className="text-right font-medium">
                 {holding.cost_basis != null ? `€${gainEur.toFixed(0)} (${gain.gainPct.toFixed(1)}%)` : "—"}

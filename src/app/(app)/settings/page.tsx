@@ -86,6 +86,7 @@ async function updateSettings(formData: FormData) {
 
   const holdTrimInCash = formData.get("hold_trim_proceeds_in_cash") === "on";
   const trimMode = String(formData.get("trim_mode") ?? "conservative");
+  const riskProfile = String(formData.get("risk_profile") ?? "moderate");
 
   const risk_limits = {
     single_stock_warn: Number(formData.get("single_stock_warn")) || 7,
@@ -106,6 +107,7 @@ async function updateSettings(formData: FormData) {
       trim_hold_period_days: Number(formData.get("trim_hold_period_days")) || 60,
       review_interval_months: Number(formData.get("review_interval_months")) || 6,
       risk_limits,
+      risk_profile: riskProfile,
     },
     { onConflict: "user_id" }
   );
@@ -320,8 +322,25 @@ export default async function SettingsPage() {
       </section>
 
       <section className="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-        <h2 className="mb-2 text-sm font-semibold">Risk limits & trim behavior</h2>
+        <h2 className="mb-1 text-sm font-semibold">Risk limits & trim behavior</h2>
         <form action={updateSettings} className="space-y-2 text-sm">
+          <label className="block">
+            Risk profile (for Holdings position-sizing)
+            <select
+              name="risk_profile"
+              defaultValue={data.settings.risk_profile ?? "moderate"}
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-2 py-1.5 dark:border-neutral-700 dark:bg-neutral-800"
+            >
+              <option value="conservative">Conservative — tighter targets, trims sooner</option>
+              <option value="moderate">Moderate — default</option>
+              <option value="aggressive">Aggressive — looser targets, more tolerance</option>
+            </select>
+          </label>
+          <p className="text-[11px] text-neutral-500">
+            Controls the volatility-adjusted target weight and 5/25 rebalance-band trigger used on the Holdings
+            screen for stocks and sector ETFs — a shakier holding gets a smaller target under any profile, but the
+            profile sets how tight the bands are overall.
+          </p>
           <div className="grid grid-cols-2 gap-2">
             <label>
               Single stock warn %

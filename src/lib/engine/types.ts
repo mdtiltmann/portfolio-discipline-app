@@ -75,6 +75,7 @@ export interface Settings {
   trim_hold_period_days: number;
   review_interval_months: number;
   risk_limits: RiskLimits;
+  risk_profile?: "conservative" | "moderate" | "aggressive";
 }
 
 export interface ContributionSchedule {
