@@ -6,6 +6,13 @@ import type {
   Settings,
 } from "./types";
 
+// Thresholds can now come from volatility-adjusted math (non-round numbers)
+// as well as static hardcoded defaults (already round) — always format for
+// display in rationale text so a long float never leaks into the UI.
+function pct(n: number): string {
+  return n.toFixed(1);
+}
+
 /**
  * Compute allocation status for a single holding against the total portfolio
  * value. This is the ONLY place status ever becomes TRIM — gain triggers are
@@ -41,16 +48,16 @@ export function computeHoldingStatus(
     const reviewAt = stopAdding + (trimAt - stopAdding) * 0.6;
     if (currentPct < stopAdding) {
       status = "BUY";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}% of the portfolio, below the ${stopAdding}% stop-adding line — fine to continue contributions here.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}% of the portfolio, below the ${pct(stopAdding)}% stop-adding line — fine to continue contributions here.`;
     } else if (currentPct >= stopAdding && currentPct < reviewAt) {
       status = "STOP_ADDING";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}%, in the ${stopAdding}-${reviewAt}% zone — stop adding new money, let it ride.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}%, in the ${pct(stopAdding)}-${pct(reviewAt)}% zone — stop adding new money, let it ride.`;
     } else if (currentPct >= reviewAt && currentPct < trimAt) {
       status = "REVIEW";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}%, approaching the ${trimAt}% trim threshold — review position, no action required yet.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}%, approaching the ${pct(trimAt)}% trim threshold — review position, no action required yet.`;
     } else {
       status = "TRIM";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}%, above the ${trimAt}% concentration limit — trim recommended back toward ${targetPct ?? 5.5}%.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}%, above the ${pct(trimAt)}% concentration limit — trim recommended back toward ${pct(targetPct ?? 5.5)}%.`;
     }
   } else if (holding.asset_class === "sector_etf") {
     const target = t.targetPct ?? 7;
@@ -59,16 +66,16 @@ export function computeHoldingStatus(
     targetPct = target;
     if (currentPct < target) {
       status = "BUY";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}% vs a ${target}% target — room to add.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}% vs a ${pct(target)}% target — room to add.`;
     } else if (currentPct < stopAdding) {
       status = "HOLD";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}%, near its ${target}% target — hold, no new buys needed.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}%, near its ${pct(target)}% target — hold, no new buys needed.`;
     } else if (currentPct < trimAt) {
       status = "STOP_ADDING";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}%, above the ${stopAdding}% stop-adding line — pause contributions here.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}%, above the ${pct(stopAdding)}% stop-adding line — pause contributions here.`;
     } else {
       status = "TRIM";
-      rationale = `${holding.ticker} is ${currentPct.toFixed(1)}%, above the ${trimAt}% sector ETF trim threshold — trim recommended.`;
+      rationale = `${holding.ticker} is ${pct(currentPct)}%, above the ${pct(trimAt)}% sector ETF trim threshold — trim recommended.`;
     }
   } else if (holding.asset_class === "broad_core_etf") {
     // Allocation-based only. Never trim purely for price gain.
