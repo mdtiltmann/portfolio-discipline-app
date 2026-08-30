@@ -35,6 +35,7 @@ interface TechnicalsResponse {
   lastPrice: number | null;
   error?: string;
   usedMock?: boolean;
+  rationale?: string;
 }
 
 // Keep signals live without the user having to reload the page. 10 minutes
@@ -153,6 +154,11 @@ export default function TechnicalPanel({ ticker }: { ticker: string }) {
             <p className="text-center text-[10px] text-neutral-400 dark:text-neutral-600">
               Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · auto-refreshes every 10 min
             </p>
+          )}
+          {data.rationale && (
+            <div className="mt-3 rounded-lg bg-neutral-50 p-2.5 text-[11px] leading-relaxed text-neutral-600 dark:bg-neutral-800/60 dark:text-neutral-300">
+              {data.rationale}
+            </div>
           )}
           {data.error && <p className="mt-1 text-center text-[11px] text-amber-500">{data.error}</p>}
         </>

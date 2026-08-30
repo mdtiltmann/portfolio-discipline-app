@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchCandles, generateMockCandles } from "@/lib/marketdata/provider";
-import { computeTechnicalSummary, DEFAULT_VERDICT_THRESHOLDS, verdictFromRatio, type VerdictThresholds } from "@/lib/technicals";
+import { toYahooSymbol } from "@/lib/marketdata/symbolMap";
+import {
+  computeTechnicalSummary,
+  DEFAULT_VERDICT_THRESHOLDS,
+  verdictFromRatio,
+  buildTechnicalRationale,
+  type VerdictThresholds,
+} from "@/lib/technicals";
 import { applyNewsNudge } from "@/lib/technicals/newsNudge";
 import { getNewsProvider } from "@/lib/news/provider";
 import { classifyNewsItem } from "@/lib/news/classify";
@@ -11,8 +18,13 @@ import { classifyNewsItem } from "@/lib/news/classify";
 // inputs. Never allowed to block the technicals response for long — capped
 // with a timeout so a slow feed degrades to "no news available" rather than
 // stalling the whole gauge.
-async function computeNewsAdjustment(ticker: string, baseRatio: number) {
-  const items = await getNewsProvider().fetchNews([ticker]);
+//
+// Queries by the resolved Yahoo symbol, not the bare portfolio ticker — a
+// bare ticker like "AIR" can resolve on Yahoo to an unrelated company (AAR
+// Corp instead of Airbus SE / AIR.PA), which would otherwise pull in and
+// quote the wrong company's headlines in the rationale below.
+async function computeNewsAdjustment(yahooSymbol: string, baseRatio: number) {
+  const items = await getNewsProvider().fetchNews([yahooSymbol]);
   const classified = await Promise.all(
     items.map(async (item) => ({
       ...item,
@@ -23,7 +35,10 @@ async function computeNewsAdjustment(ticker: string, baseRatio: number) {
     baseRatio,
     classified.map((c) => ({ sentiment: c.sentiment, materiality: c.materiality }))
   );
-  return { adjustedRatio, nudgeApplied, newsCount: classified.length };
+  const materialNews = classified
+    .filter((c) => c.materiality === "material")
+    .map((c) => ({ headline: c.headline, sentiment: c.sentiment }));
+  return { adjustedRatio, nudgeApplied, materialNews };
 }
 
 // Best-effort technicals endpoint for a single ticker: never throws a 5xx
@@ -46,6 +61,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
     ]);
     const override = metaRows?.yahoo_symbol ?? null;
     const thresholds: VerdictThresholds = settingsRow?.verdict_thresholds ?? DEFAULT_VERDICT_THRESHOLDS;
+    const yahooSymbol = toYahooSymbol(ticker, override);
 
     let candles = await fetchCandles(ticker, interval, override);
     let usedMock = false;
@@ -68,24 +84,39 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
     const baseRatio = total > 0 ? (summaryPanel.buy - summaryPanel.sell) / total : 0;
     let newsAdjustedVerdict: string | null = null;
     let newsNudgeApplied = 0;
+    let materialNews: { headline: string; sentiment: "positive" | "neutral" | "negative" }[] = [];
     try {
       const adjustment = await Promise.race([
-        computeNewsAdjustment(ticker, baseRatio),
+        computeNewsAdjustment(yahooSymbol, baseRatio),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
       ]);
       if (adjustment) {
         newsNudgeApplied = adjustment.nudgeApplied;
         newsAdjustedVerdict = verdictFromRatio(adjustment.adjustedRatio, thresholds);
+        materialNews = adjustment.materialNews;
       }
     } catch {
       // News fetch/classification failed — fall back to the pure-technical verdict.
     }
 
+    const resolvedNewsAdjustedVerdict = newsAdjustedVerdict ?? summaryPanel.verdict;
+
     const summaryWithNews = {
       ...summaryPanel,
-      newsAdjustedVerdict: newsAdjustedVerdict ?? summaryPanel.verdict,
+      newsAdjustedVerdict: resolvedNewsAdjustedVerdict,
       newsNudgeApplied,
     };
+
+    const rationale = buildTechnicalRationale({
+      ticker,
+      movingAverages: summary.movingAverages,
+      oscillators: summary.oscillators,
+      technicalVerdict: summaryPanel.verdict,
+      newsAdjustedVerdict: resolvedNewsAdjustedVerdict as typeof summaryPanel.verdict,
+      newsNudgeApplied,
+      materialNews,
+      lastPrice,
+    });
 
     return NextResponse.json({
       ticker,
@@ -96,6 +127,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
       summary: summaryWithNews,
       lastPrice,
       usedMock,
+      rationale,
     });
   } catch (err) {
     return NextResponse.json({
