@@ -17,11 +17,12 @@ interface NewsRow {
   materiality: string | null;
 }
 
-const MATERIALITY_STYLE: Record<string, string> = {
-  material: "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300",
-  worth_watching:
-    "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300",
-  noise: "border-neutral-300 bg-neutral-50 text-neutral-600 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400",
+// Card color reflects sentiment (how the news reads), not materiality (how
+// much it matters) — materiality still drives the section grouping below.
+const SENTIMENT_STYLE: Record<string, string> = {
+  positive: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300",
+  neutral: "border-yellow-300 bg-yellow-50 text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-200",
+  negative: "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300",
 };
 
 const SENTIMENT_LABEL: Record<string, string> = {
@@ -117,7 +118,7 @@ export default async function NewsPage() {
                 return (
                   <div
                     key={item.id}
-                    className={`rounded-2xl border p-3 text-sm ${MATERIALITY_STYLE[item.materiality ?? "noise"]}`}
+                    className={`rounded-2xl border p-3 text-sm ${SENTIMENT_STYLE[item.sentiment ?? "neutral"]}`}
                   >
                     <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
                       {item.ticker && <span className="font-semibold">{item.ticker}</span>}
