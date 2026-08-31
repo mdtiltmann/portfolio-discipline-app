@@ -19,7 +19,7 @@ export default function NewsRefreshButton() {
       const res = await fetch("/api/news/refresh", { method: "POST" });
       const data = await res.json();
       if (!isBackground) {
-        setMessage(data.message ?? `Fetched ${data.fetched ?? 0}, saved ${data.inserted ?? 0}.`);
+        setMessage(data.message ?? `Fetched ${data.fetched ?? 0}, ${data.inserted ?? 0} new.`);
       }
       setLastUpdated(new Date());
       startTransition(() => router.refresh());
