@@ -6,6 +6,21 @@
 import { toYahooSymbol } from "./symbolMap";
 import type { Candle } from "@/lib/technicals/types";
 
+// Yahoo quotes some London-listed securities in pence (minor currency
+// units) rather than pounds — the `meta.currency` field comes back as
+// "GBp" (or occasionally "GBX"), NOT "GBP". Every price/candle value in
+// that response is 1/100 of the actual pound value. Without normalizing
+// this, anything downstream that multiplies price by share quantity (gain
+// %, portfolio value) is inflated ~100x for those tickers — this is a real
+// bug that was caught from a user-reported gain % that was wildly wrong
+// (~9000% instead of ~5%) for a GBp-denominated ETF.
+const PENCE_CURRENCIES = new Set(["GBp", "GBX"]);
+
+export function normalizePriceUnit(value: number, currency: string | undefined): number {
+  if (currency && PENCE_CURRENCIES.has(currency)) return value / 100;
+  return value;
+}
+
 export interface Quote {
   ticker: string;
   price: number;
@@ -38,13 +53,19 @@ export class YahooFinanceQuoteProvider implements PriceProvider {
           if (!res.ok) return;
           const json = await res.json();
           const result = json?.chart?.result?.[0];
-          const price = result?.meta?.regularMarketPrice;
+          const rawPrice = result?.meta?.regularMarketPrice;
           const currency = result?.meta?.currency;
-          if (typeof price !== "number" || !Number.isFinite(price)) return;
+          if (typeof rawPrice !== "number" || !Number.isFinite(rawPrice)) return;
+          // Normalize pence-denominated LSE quotes to pounds so this price
+          // is directly comparable to a cost basis/portfolio value entered
+          // in major currency units.
+          const price = normalizePriceUnit(rawPrice, typeof currency === "string" ? currency : undefined);
+          const normalizedCurrency =
+            typeof currency === "string" && PENCE_CURRENCIES.has(currency) ? "GBP" : currency;
           results.push({
             ticker,
             price,
-            currency: typeof currency === "string" ? currency : "EUR",
+            currency: typeof normalizedCurrency === "string" ? normalizedCurrency : "EUR",
             asOf: new Date().toISOString(),
           });
         } catch {
@@ -143,6 +164,7 @@ export async function fetchCandles(
     const json = await res.json();
     const result = json?.chart?.result?.[0];
     if (!result) return [];
+    const currency: string | undefined = result?.meta?.currency;
     const timestamps: number[] = result.timestamp ?? [];
     const quote = result.indicators?.quote?.[0] ?? {};
     const opens: (number | null)[] = quote.open ?? [];
@@ -158,12 +180,14 @@ export async function fetchCandles(
       const low = lows[i];
       const close = closes[i];
       if (open == null || high == null || low == null || close == null) continue;
+      // Normalize pence-denominated LSE quotes to pounds — see
+      // normalizePriceUnit's comment above for why this matters.
       candles.push({
         time: timestamps[i],
-        open,
-        high,
-        low,
-        close,
+        open: normalizePriceUnit(open, currency),
+        high: normalizePriceUnit(high, currency),
+        low: normalizePriceUnit(low, currency),
+        close: normalizePriceUnit(close, currency),
         volume: volumes[i] ?? 0,
       });
     }
