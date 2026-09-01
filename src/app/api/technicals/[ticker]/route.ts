@@ -10,7 +10,8 @@ import {
   buildTechnicalRationale,
   type VerdictThresholds,
 } from "@/lib/technicals";
-import { applyNewsNudge } from "@/lib/technicals/newsNudge";
+import { applyNewsNudge, MAX_NEWS_NUDGE } from "@/lib/technicals/newsNudge";
+import { computeGainNudge } from "@/lib/technicals/gainNudge";
 import { getNewsProvider } from "@/lib/news/provider";
 import { classifyNewsItem } from "@/lib/news/classify";
 
@@ -41,6 +42,10 @@ async function computeNewsAdjustment(yahooSymbol: string, baseRatio: number) {
   return { adjustedRatio, nudgeApplied, materialNews };
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 // Best-effort technicals endpoint for a single ticker: never throws a 5xx
 // for a data problem, this is a personal dashboard, not a trading system.
 // On failure we return 200 with an `error` field and empty-ish panels so
@@ -55,9 +60,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
 
   try {
     const supabase = await createClient();
-    const [{ data: metaRows }, { data: settingsRow }] = await Promise.all([
+    const [{ data: metaRows }, { data: settingsRow }, { data: holdingRow }] = await Promise.all([
       supabase.from("asset_metadata").select("yahoo_symbol").eq("ticker", ticker).maybeSingle(),
       supabase.from("settings").select("verdict_thresholds").eq("user_id", user.id).maybeSingle(),
+      // RLS scopes holdings to the caller's own portfolio already.
+      supabase.from("holdings").select("cost_basis, quantity, current_value").eq("ticker", ticker).maybeSingle(),
     ]);
     const override = metaRows?.yahoo_symbol ?? null;
     const thresholds: VerdictThresholds = settingsRow?.verdict_thresholds ?? DEFAULT_VERDICT_THRESHOLDS;
@@ -76,13 +83,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
     const summary = computeTechnicalSummary(candles, thresholds);
     const lastPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
 
-    // News-nudge the Summary panel's verdict only (Oscillators/Moving
-    // Averages panels stay pure-technical). Best-effort and time-boxed so a
-    // slow news feed never holds up the gauge for more than ~3s.
+    // Unrealized gain/loss vs cost basis — prefer live quantity*lastPrice
+    // over the (possibly stale, only updated on manual price refresh)
+    // stored current_value, when both a quantity and a live price exist.
+    let gainPct: number | null = null;
+    if (holdingRow?.cost_basis != null && holdingRow.cost_basis > 0) {
+      const liveValue =
+        holdingRow.quantity != null && holdingRow.quantity > 0 && lastPrice != null
+          ? holdingRow.quantity * lastPrice
+          : holdingRow.current_value;
+      if (liveValue != null) {
+        gainPct = ((liveValue - holdingRow.cost_basis) / holdingRow.cost_basis) * 100;
+      }
+    }
+
+    // News-nudge and gain-nudge the Summary panel's verdict only
+    // (Oscillators/Moving Averages panels stay pure-technical). News is
+    // best-effort and time-boxed so a slow feed never holds up the gauge
+    // for more than ~3s. Both nudges are "informational context, not a
+    // dominant signal" — their COMBINED effect is capped at the same
+    // magnitude as either alone, so technicals still dominate even when
+    // news and unrealized gain both point the same way.
     const { summary: summaryPanel } = summary;
     const total = summaryPanel.buy + summaryPanel.sell + summaryPanel.neutral;
     const baseRatio = total > 0 ? (summaryPanel.buy - summaryPanel.sell) / total : 0;
-    let newsAdjustedVerdict: string | null = null;
     let newsNudgeApplied = 0;
     let materialNews: { headline: string; sentiment: "positive" | "neutral" | "negative" }[] = [];
     try {
@@ -92,19 +116,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
       ]);
       if (adjustment) {
         newsNudgeApplied = adjustment.nudgeApplied;
-        newsAdjustedVerdict = verdictFromRatio(adjustment.adjustedRatio, thresholds);
         materialNews = adjustment.materialNews;
       }
     } catch {
-      // News fetch/classification failed — fall back to the pure-technical verdict.
+      // News fetch/classification failed — treat as no news nudge.
     }
 
-    const resolvedNewsAdjustedVerdict = newsAdjustedVerdict ?? summaryPanel.verdict;
+    const { nudgeApplied: gainNudgeApplied } = computeGainNudge(gainPct);
+    const combinedNudge = clamp(newsNudgeApplied + gainNudgeApplied, -MAX_NEWS_NUDGE, MAX_NEWS_NUDGE);
+    const personalizedRatio = clamp(baseRatio + combinedNudge, -1, 1);
+    const personalizedVerdict = verdictFromRatio(personalizedRatio, thresholds);
 
-    const summaryWithNews = {
+    const summaryWithAdjustments = {
       ...summaryPanel,
-      newsAdjustedVerdict: resolvedNewsAdjustedVerdict,
+      // Kept for back-compat with anything reading the news-only figure.
+      newsAdjustedVerdict: verdictFromRatio(clamp(baseRatio + newsNudgeApplied, -1, 1), thresholds),
       newsNudgeApplied,
+      gainNudgeApplied,
+      personalizedVerdict,
     };
 
     const rationale = buildTechnicalRationale({
@@ -112,10 +141,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
       movingAverages: summary.movingAverages,
       oscillators: summary.oscillators,
       technicalVerdict: summaryPanel.verdict,
-      newsAdjustedVerdict: resolvedNewsAdjustedVerdict as typeof summaryPanel.verdict,
+      personalizedVerdict,
       newsNudgeApplied,
+      gainNudgeApplied,
       materialNews,
       lastPrice,
+      gainPct,
     });
 
     return NextResponse.json({
@@ -124,9 +155,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ tick
       asOf: new Date().toISOString(),
       movingAverages: summary.movingAverages,
       oscillators: summary.oscillators,
-      summary: summaryWithNews,
+      summary: summaryWithAdjustments,
       lastPrice,
       usedMock,
+      gainPct,
       rationale,
     });
   } catch (err) {

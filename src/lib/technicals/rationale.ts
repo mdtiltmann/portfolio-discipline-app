@@ -1,7 +1,7 @@
 // Builds a short, plain-English explanation of why a ticker's signal is
-// what it is, grounded strictly in the already-computed indicator values
-// and news items — no separate model call per card, no invented claims.
-// Informational only, not financial advice.
+// what it is, grounded strictly in the already-computed indicator values,
+// news items, and unrealized gain/loss — no separate model call per card,
+// no invented claims. Informational only, not financial advice.
 
 import type { IndicatorResult, PanelResult, Verdict } from "./types";
 
@@ -14,11 +14,13 @@ export interface RationaleInput {
   ticker: string;
   movingAverages: PanelResult;
   oscillators: PanelResult;
-  technicalVerdict: Verdict; // pure-technical summary verdict, pre-news
-  newsAdjustedVerdict: Verdict;
-  newsNudgeApplied: number; // ratio-space nudge, e.g. 0.075
+  technicalVerdict: Verdict; // pure-technical summary verdict, pre-adjustment
+  personalizedVerdict: Verdict; // final verdict after news + gain nudges
+  newsNudgeApplied: number; // ratio-space nudge from news alone, e.g. 0.075
+  gainNudgeApplied: number; // ratio-space nudge from unrealized gain/loss alone
   materialNews: MaterialNewsInput[]; // already filtered to materiality === "material"
   lastPrice: number | null;
+  gainPct: number | null; // unrealized gain/loss vs cost basis, e.g. 72 for +72%
 }
 
 const SHORT_TERM_NAMES = new Set(["SMA10", "EMA10", "SMA20", "EMA20"]);
@@ -67,14 +69,37 @@ function describeNews(materialNews: MaterialNewsInput[], nudgeApplied: number): 
   return `${materialNews.length} material headline${materialNews.length > 1 ? "s" : ""} recently (${skew}, ${positive} positive / ${negative} negative), ${tilt}${sample ? ` — e.g. "${sample}"` : ""}.`;
 }
 
+function describeGain(gainPct: number | null, nudgeApplied: number): string | null {
+  if (gainPct == null) return null;
+  const direction = gainPct >= 0 ? "up" : "down";
+  const magnitude = Math.abs(gainPct).toFixed(0);
+  if (Math.abs(nudgeApplied) < 0.01) {
+    return `You're ${direction} ${magnitude}% on this position, not yet enough to factor into the call.`;
+  }
+  if (gainPct > 0) {
+    return `You're up ${magnitude}% on this position — that unrealized gain is nudging the call toward Sell (take-profit pressure), independent of what the price is doing right now.`;
+  }
+  return `You're down ${magnitude}% on this position — that unrealized loss is nudging the call toward Buy (a "buy the dip" lean), though cutting losses instead is a legitimate call the technicals won't make for you.`;
+}
+
 /**
- * Produces 2-4 short sentences: the overall call, why the moving averages
- * and oscillators point that way (including short vs long-term trend
- * alignment), a couple of specific readings (RSI, MACD) if available, and
- * how news is (or isn't) factoring in.
+ * Produces short sentences: the overall call, why the moving averages and
+ * oscillators point that way (including short vs long-term trend
+ * alignment), a couple of specific readings (RSI, MACD) if available, how
+ * news is (or isn't) factoring in, and how your own unrealized gain/loss is
+ * (or isn't) factoring in.
  */
 export function buildTechnicalRationale(input: RationaleInput): string {
-  const { movingAverages, oscillators, technicalVerdict, newsAdjustedVerdict, newsNudgeApplied, materialNews } = input;
+  const {
+    movingAverages,
+    oscillators,
+    technicalVerdict,
+    personalizedVerdict,
+    newsNudgeApplied,
+    gainNudgeApplied,
+    materialNews,
+    gainPct,
+  } = input;
 
   const sentences: string[] = [];
 
@@ -84,7 +109,7 @@ export function buildTechnicalRationale(input: RationaleInput): string {
   const longLean = longTerm.buy > longTerm.sell ? "up" : longTerm.sell > longTerm.buy ? "down" : "flat";
 
   sentences.push(
-    `Call: ${newsAdjustedVerdict}${newsAdjustedVerdict !== technicalVerdict ? ` (technicals alone said ${technicalVerdict})` : ""} — moving averages are ${movingAverages.verdict.toLowerCase()} (${movingAverages.buy} buy / ${movingAverages.sell} sell / ${movingAverages.neutral} neutral) while oscillators are ${oscillators.verdict.toLowerCase()} (${oscillators.buy} buy / ${oscillators.sell} sell / ${oscillators.neutral} neutral).`
+    `Call: ${personalizedVerdict}${personalizedVerdict !== technicalVerdict ? ` (technicals alone said ${technicalVerdict})` : ""} — moving averages are ${movingAverages.verdict.toLowerCase()} (${movingAverages.buy} buy / ${movingAverages.sell} sell / ${movingAverages.neutral} neutral) while oscillators are ${oscillators.verdict.toLowerCase()} (${oscillators.buy} buy / ${oscillators.sell} sell / ${oscillators.neutral} neutral).`
   );
 
   if (shortLean !== longLean && shortLean !== "flat" && longLean !== "flat") {
@@ -101,6 +126,9 @@ export function buildTechnicalRationale(input: RationaleInput): string {
   if (oscBits.length > 0) sentences.push(oscBits.join(". ") + ".");
 
   sentences.push(describeNews(materialNews, newsNudgeApplied));
+
+  const gainSentence = describeGain(gainPct, gainNudgeApplied);
+  if (gainSentence) sentences.push(gainSentence);
 
   return sentences.join(" ");
 }

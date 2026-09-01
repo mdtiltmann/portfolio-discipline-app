@@ -2,15 +2,17 @@ import type { Config } from "@netlify/functions";
 import { fetchCandles, generateMockCandles } from "../../src/lib/marketdata/provider";
 import { toYahooSymbol } from "../../src/lib/marketdata/symbolMap";
 import { computeTechnicalSummary, verdictFromRatio, DEFAULT_VERDICT_THRESHOLDS } from "../../src/lib/technicals";
-import { applyNewsNudge } from "../../src/lib/technicals/newsNudge";
+import { applyNewsNudge, MAX_NEWS_NUDGE } from "../../src/lib/technicals/newsNudge";
+import { computeGainNudge } from "../../src/lib/technicals/gainNudge";
 import { getNewsProvider } from "../../src/lib/news/provider";
 import { classifyNewsItem } from "../../src/lib/news/classify";
 import { sendPushToUser, createServiceRoleClient } from "../../src/lib/push/send";
 
-// Daily digest: for every user with holdings, recomputes the news-adjusted
-// technical verdict for each ticker and sends ONE push notification per
-// user summarizing which of their holdings currently look like a Buy and
-// which look like a Sell — three times a day, at fixed times.
+// Daily digest: for every user with holdings, recomputes each ticker's
+// personalized verdict (technicals + news + that user's own unrealized
+// gain/loss vs cost basis) and sends ONE push notification per user
+// summarizing which of their holdings currently look like a Buy and which
+// look like a Sell — three times a day, at fixed times.
 //
 // Cadence: 09:00 / 15:00 / 19:00 CET, requested as those exact wall-clock
 // times. Netlify cron runs in UTC with no DST awareness, so this is pinned
@@ -31,23 +33,37 @@ function isSell(verdict: Verdict): boolean {
   return verdict === "Sell" || verdict === "Strong Sell";
 }
 
-async function computeEffectiveVerdict(ticker: string, yahooSymbol: string): Promise<Verdict> {
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+interface TickerBase {
+  baseRatio: number;
+  newsNudgeApplied: number;
+  lastPrice: number | null;
+}
+
+// Market-wide part (technicals + news) is the same for every user holding a
+// given ticker, so it's computed once per ticker and reused. The gain nudge
+// is NOT shared — it depends on each user's own cost basis and quantity for
+// that holding — and is applied per (user, ticker) below.
+async function computeTickerBase(yahooSymbol: string): Promise<TickerBase> {
   let candles = await fetchCandles(yahooSymbol, "1d");
   if (candles.length < 30) candles = generateMockCandles(yahooSymbol);
   const { summary } = computeTechnicalSummary(candles, DEFAULT_VERDICT_THRESHOLDS);
   const total = summary.buy + summary.sell + summary.neutral;
   const baseRatio = total > 0 ? (summary.buy - summary.sell) / total : 0;
+  const lastPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
 
   try {
     const newsItems = await getNewsProvider().fetchNews([yahooSymbol]);
     const classified = await Promise.all(
       newsItems.map(async (item) => classifyNewsItem(item.headline, item.summary))
     );
-    const { adjustedRatio } = applyNewsNudge(baseRatio, classified);
-    return verdictFromRatio(adjustedRatio, DEFAULT_VERDICT_THRESHOLDS);
+    const { nudgeApplied } = applyNewsNudge(baseRatio, classified);
+    return { baseRatio, newsNudgeApplied: nudgeApplied, lastPrice };
   } catch {
-    // News unavailable — fall back to the pure-technical verdict.
-    return summary.verdict as Verdict;
+    return { baseRatio, newsNudgeApplied: 0, lastPrice };
   }
 }
 
@@ -56,61 +72,83 @@ const handler = async () => {
 
   const { data: holdingsRows, error } = await supabase
     .from("holdings")
-    .select("ticker, portfolio_id, portfolios(user_id)");
+    .select("ticker, cost_basis, quantity, current_value, portfolio_id, portfolios(user_id)");
 
   if (error) {
     console.error("check-signals: failed to load holdings:", error.message);
     return;
   }
 
-  // Group tickers per user.
-  const tickersByUser = new Map<string, Set<string>>();
-  for (const row of (holdingsRows ?? []) as Array<{
+  type HoldingRow = {
     ticker: string;
+    cost_basis: number | null;
+    quantity: number | null;
+    current_value: number | null;
     portfolios: { user_id: string } | { user_id: string }[] | null;
-  }>) {
+  };
+
+  // Group holdings per user, keeping each holding's own cost basis/quantity
+  // for the gain nudge.
+  const holdingsByUser = new Map<string, Array<{ ticker: string; cost_basis: number | null; quantity: number | null; current_value: number | null }>>();
+  for (const row of (holdingsRows ?? []) as HoldingRow[]) {
     const portfolio = Array.isArray(row.portfolios) ? row.portfolios[0] : row.portfolios;
     const userId = portfolio?.user_id;
     const ticker = row.ticker?.toUpperCase();
     if (!userId || !ticker) continue;
-    if (!tickersByUser.has(userId)) tickersByUser.set(userId, new Set());
-    tickersByUser.get(userId)!.add(ticker);
+    if (!holdingsByUser.has(userId)) holdingsByUser.set(userId, []);
+    holdingsByUser.get(userId)!.push({
+      ticker,
+      cost_basis: row.cost_basis,
+      quantity: row.quantity,
+      current_value: row.current_value,
+    });
   }
 
-  if (tickersByUser.size === 0) return;
+  if (holdingsByUser.size === 0) return;
 
-  const tickers = Array.from(new Set(Array.from(tickersByUser.values()).flatMap((s) => Array.from(s))));
+  const tickers = Array.from(
+    new Set(Array.from(holdingsByUser.values()).flatMap((rows) => rows.map((r) => r.ticker)))
+  );
   const { data: metaRows } = await supabase
     .from("asset_metadata")
     .select("ticker, yahoo_symbol")
     .in("ticker", tickers);
   const overrideByTicker = new Map((metaRows ?? []).map((r) => [r.ticker.toUpperCase(), r.yahoo_symbol]));
 
-  // Compute each ticker's verdict once (shared across users who hold it),
-  // then assemble per-user digests. This digest model sends a fixed-time
-  // summary regardless of whether the verdict changed, so signal_state
-  // (originally used to gate hourly change-only alerts) is no longer
-  // written here.
-  const verdictByTicker = new Map<string, Verdict>();
+  // Market-wide (technicals + news) computed once per ticker.
+  const baseByTicker = new Map<string, TickerBase>();
   for (const ticker of tickers) {
     try {
       const symbol = toYahooSymbol(ticker, overrideByTicker.get(ticker));
-      const verdict = await computeEffectiveVerdict(ticker, symbol);
-      verdictByTicker.set(ticker, verdict);
+      baseByTicker.set(ticker, await computeTickerBase(symbol));
     } catch (err) {
-      console.error(`check-signals: failed to compute verdict for ${ticker}:`, err);
+      console.error(`check-signals: failed to compute base signal for ${ticker}:`, err);
     }
   }
 
-  for (const [userId, tickerSet] of tickersByUser.entries()) {
+  for (const [userId, rows] of holdingsByUser.entries()) {
     try {
       const buys: string[] = [];
       const sells: string[] = [];
-      for (const ticker of tickerSet) {
-        const verdict = verdictByTicker.get(ticker);
-        if (!verdict) continue;
-        if (isBuy(verdict)) buys.push(ticker);
-        else if (isSell(verdict)) sells.push(ticker);
+      for (const row of rows) {
+        const base = baseByTicker.get(row.ticker);
+        if (!base) continue;
+
+        let gainPct: number | null = null;
+        if (row.cost_basis != null && row.cost_basis > 0) {
+          const liveValue =
+            row.quantity != null && row.quantity > 0 && base.lastPrice != null
+              ? row.quantity * base.lastPrice
+              : row.current_value;
+          if (liveValue != null) gainPct = ((liveValue - row.cost_basis) / row.cost_basis) * 100;
+        }
+        const { nudgeApplied: gainNudgeApplied } = computeGainNudge(gainPct);
+        const combinedNudge = clamp(base.newsNudgeApplied + gainNudgeApplied, -MAX_NEWS_NUDGE, MAX_NEWS_NUDGE);
+        const personalizedRatio = clamp(base.baseRatio + combinedNudge, -1, 1);
+        const verdict = verdictFromRatio(personalizedRatio, DEFAULT_VERDICT_THRESHOLDS) as Verdict;
+
+        if (isBuy(verdict)) buys.push(row.ticker);
+        else if (isSell(verdict)) sells.push(row.ticker);
       }
 
       const title =

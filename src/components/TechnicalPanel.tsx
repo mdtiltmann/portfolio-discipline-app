@@ -26,6 +26,8 @@ interface Panel {
 interface SummaryPanel extends Panel {
   newsAdjustedVerdict?: string;
   newsNudgeApplied?: number;
+  gainNudgeApplied?: number;
+  personalizedVerdict?: string;
 }
 
 interface TechnicalsResponse {
@@ -36,6 +38,7 @@ interface TechnicalsResponse {
   error?: string;
   usedMock?: boolean;
   rationale?: string;
+  gainPct?: number | null;
 }
 
 // Keep signals live without the user having to reload the page. 10 minutes
@@ -139,7 +142,7 @@ export default function TechnicalPanel({ ticker }: { ticker: string }) {
               label="Summary"
               size="lg"
               {...data.summary}
-              verdict={data.summary.newsAdjustedVerdict ?? data.summary.verdict}
+              verdict={data.summary.personalizedVerdict ?? data.summary.verdict}
               technicalVerdict={data.summary.verdict}
             />
             <TechnicalGauge label="Moving Averages" size="sm" {...data.movingAverages} />
@@ -148,6 +151,13 @@ export default function TechnicalPanel({ ticker }: { ticker: string }) {
             <p className="mt-2 text-center text-[11px] text-neutral-400">
               Last price: {data.lastPrice.toFixed(2)}
               {data.usedMock ? " (synthetic — live data unavailable)" : ""}
+              {data.gainPct != null && (
+                <span className={data.gainPct >= 0 ? "text-emerald-500" : "text-red-500"}>
+                  {" · "}
+                  {data.gainPct >= 0 ? "+" : ""}
+                  {data.gainPct.toFixed(1)}% since cost basis
+                </span>
+              )}
             </p>
           )}
           {lastUpdated && (

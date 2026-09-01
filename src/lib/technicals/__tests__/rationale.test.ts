@@ -25,10 +25,12 @@ describe("buildTechnicalRationale", () => {
         { name: "MACD(12,26,9)", signal: "Sell", value: -0.5 },
       ]),
       technicalVerdict: "Buy",
-      newsAdjustedVerdict: "Buy",
+      personalizedVerdict: "Buy",
       newsNudgeApplied: 0.075,
+      gainNudgeApplied: 0,
       materialNews: [{ headline: "Nvidia beats earnings", sentiment: "positive" }],
       lastPrice: 217.5,
+      gainPct: null,
     });
 
     expect(text).toContain("Call: Buy");
@@ -53,13 +55,51 @@ describe("buildTechnicalRationale", () => {
       ]),
       oscillators: panel(0, 0, 11, "Neutral", []),
       technicalVerdict: "Neutral",
-      newsAdjustedVerdict: "Neutral",
+      personalizedVerdict: "Neutral",
       newsNudgeApplied: 0,
+      gainNudgeApplied: 0,
       materialNews: [],
       lastPrice: 100,
+      gainPct: null,
     });
 
     expect(text).toContain("Short-term averages are trending up while longer-term averages are trending down");
     expect(text).toContain("No material news is currently affecting this call.");
+  });
+
+  it("explains a large unrealized gain nudging the call toward Sell", () => {
+    const text = buildTechnicalRationale({
+      ticker: "NVDA",
+      movingAverages: panel(6, 6, 0, "Neutral", []),
+      oscillators: panel(0, 0, 11, "Neutral", []),
+      technicalVerdict: "Neutral",
+      personalizedVerdict: "Sell",
+      newsNudgeApplied: 0,
+      gainNudgeApplied: -0.12,
+      materialNews: [],
+      lastPrice: 300,
+      gainPct: 85,
+    });
+
+    expect(text).toContain("You're up 85%");
+    expect(text).toContain("nudging the call toward Sell");
+  });
+
+  it("explains a large unrealized loss nudging the call toward Buy", () => {
+    const text = buildTechnicalRationale({
+      ticker: "NVDA",
+      movingAverages: panel(6, 6, 0, "Neutral", []),
+      oscillators: panel(0, 0, 11, "Neutral", []),
+      technicalVerdict: "Neutral",
+      personalizedVerdict: "Buy",
+      newsNudgeApplied: 0,
+      gainNudgeApplied: 0.1,
+      materialNews: [],
+      lastPrice: 50,
+      gainPct: -60,
+    });
+
+    expect(text).toContain("You're down 60%");
+    expect(text).toContain("nudging the call toward Buy");
   });
 });
