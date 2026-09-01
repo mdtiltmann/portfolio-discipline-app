@@ -3,6 +3,7 @@ import { loadPortfolioData, computeAllStatusesWithRisk } from "@/lib/portfolio";
 import { computeTrimAmount, DEFAULT_RISK_PROFILE } from "@/lib/engine";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
 import ManualHoldingForm from "./ManualHoldingForm";
+import CostBasisEditor from "./CostBasisEditor";
 
 function statusColor(status: string) {
   switch (status) {
@@ -39,7 +40,9 @@ export default async function HoldingsPage() {
         this holding represents versus a target weight. For stocks and sector ETFs, that target is volatility-adjusted
         (a shakier holding gets a smaller target) and the trim trigger uses the 5/25 rebalance-band rule, under your{" "}
         <strong>{profileName}</strong> risk profile (change it in Settings). This is separate from the technical
-        Buy/Sell signals on the Signals screen.
+        Buy/Sell signals on the Signals screen — though what you enter below as{" "}
+        <strong>&quot;What you paid&quot;</strong> also feeds a small profit-taking/loss nudge on the Signals screen,
+        so it&apos;s worth filling in.
       </p>
 
       {statuses.length === 0 && <p className="text-sm text-neutral-500">No holdings yet — add one above.</p>}
@@ -85,10 +88,6 @@ export default async function HoldingsPage() {
               <span className="text-right font-medium">
                 {holding.cost_basis != null ? `€${gainEur.toFixed(0)} (${gain.gainPct.toFixed(1)}%)` : "—"}
               </span>
-              <span>Cost basis</span>
-              <span className="text-right font-medium">
-                {holding.cost_basis != null ? `€${holding.cost_basis.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : "—"}
-              </span>
               {status.status === "TRIM" && (
                 <>
                   <span>Suggested trim</span>
@@ -96,6 +95,8 @@ export default async function HoldingsPage() {
                 </>
               )}
             </div>
+
+            <CostBasisEditor ticker={holding.ticker} currentCostBasis={holding.cost_basis} />
 
             <p className="mt-2 text-xs leading-relaxed opacity-90">{rationale}</p>
             <p className="mt-1 text-[10px] opacity-60">
