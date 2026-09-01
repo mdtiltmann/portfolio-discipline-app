@@ -21,6 +21,42 @@ export function normalizePriceUnit(value: number, currency: string | undefined):
   return value;
 }
 
+// This app's values (cost basis, portfolio totals) are entered/tracked in
+// EUR. Yahoo returns each instrument's price in ITS OWN listing currency
+// (USD for US stocks, GBP for LSE, CHF for Swiss, etc) with no conversion —
+// without converting to EUR here, comparing a USD or GBP price against a
+// EUR cost basis silently produces a wrong gain/loss (a real bug found via
+// a user-reported IITU gain of -9.96% instead of the correct +5.05%: the
+// GBP price was being treated as if it were already EUR).
+export const BASE_CURRENCY = "EUR";
+
+/**
+ * Fetches how many BASE_CURRENCY units one unit of `currency` is worth,
+ * via Yahoo's FX pair quote convention ("GBPEUR=X" etc). Returns 1 (no
+ * conversion) for the base currency itself, an unknown/missing currency, or
+ * on any fetch failure — best-effort, never throws, this is a personal
+ * dashboard not a trading system.
+ */
+export async function getFxRate(currency: string | undefined): Promise<number> {
+  if (!currency || currency === BASE_CURRENCY) return 1;
+  try {
+    const symbol = `${currency}${BASE_CURRENCY}=X`;
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`,
+      {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; PortfolioDiscipline/1.0)" },
+        signal: AbortSignal.timeout(6000),
+      }
+    );
+    if (!res.ok) return 1;
+    const json = await res.json();
+    const rate = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    return typeof rate === "number" && Number.isFinite(rate) && rate > 0 ? rate : 1;
+  } catch {
+    return 1;
+  }
+}
+
 export interface Quote {
   ticker: string;
   price: number;
@@ -56,16 +92,19 @@ export class YahooFinanceQuoteProvider implements PriceProvider {
           const rawPrice = result?.meta?.regularMarketPrice;
           const currency = result?.meta?.currency;
           if (typeof rawPrice !== "number" || !Number.isFinite(rawPrice)) return;
-          // Normalize pence-denominated LSE quotes to pounds so this price
-          // is directly comparable to a cost basis/portfolio value entered
-          // in major currency units.
-          const price = normalizePriceUnit(rawPrice, typeof currency === "string" ? currency : undefined);
+          // Normalize pence-denominated LSE quotes to pounds, then convert
+          // to this app's base currency (EUR) so the returned price is
+          // directly comparable to a cost basis/portfolio value without
+          // the caller needing to know or handle the original currency.
           const normalizedCurrency =
             typeof currency === "string" && PENCE_CURRENCIES.has(currency) ? "GBP" : currency;
+          const majorUnitPrice = normalizePriceUnit(rawPrice, typeof currency === "string" ? currency : undefined);
+          const fxRate = await getFxRate(typeof normalizedCurrency === "string" ? normalizedCurrency : undefined);
+          const price = majorUnitPrice * fxRate;
           results.push({
             ticker,
             price,
-            currency: typeof normalizedCurrency === "string" ? normalizedCurrency : "EUR",
+            currency: BASE_CURRENCY,
             asOf: new Date().toISOString(),
           });
         } catch {
@@ -164,7 +203,16 @@ export async function fetchCandles(
     const json = await res.json();
     const result = json?.chart?.result?.[0];
     if (!result) return [];
-    const currency: string | undefined = result?.meta?.currency;
+    const rawCurrency: string | undefined = result?.meta?.currency;
+    const currency = rawCurrency && PENCE_CURRENCIES.has(rawCurrency) ? "GBP" : rawCurrency;
+    // One FX lookup per fetchCandles call (not per candle) — converts the
+    // whole series to this app's base currency (EUR) in one multiply below.
+    // Note: this uses TODAY's FX rate applied uniformly across the whole
+    // history, so older candles are approximately, not exactly, converted
+    // at the rate that applied on that historical date. That's fine for
+    // technical-indicator math (scale-invariant, see indicators.ts) but
+    // means don't treat historical candle values as precise EUR amounts.
+    const fxRate = await getFxRate(currency);
     const timestamps: number[] = result.timestamp ?? [];
     const quote = result.indicators?.quote?.[0] ?? {};
     const opens: (number | null)[] = quote.open ?? [];
@@ -180,14 +228,14 @@ export async function fetchCandles(
       const low = lows[i];
       const close = closes[i];
       if (open == null || high == null || low == null || close == null) continue;
-      // Normalize pence-denominated LSE quotes to pounds — see
-      // normalizePriceUnit's comment above for why this matters.
+      // Normalize pence-denominated LSE quotes to pounds, then convert to
+      // EUR — see normalizePriceUnit's and getFxRate's comments above.
       candles.push({
         time: timestamps[i],
-        open: normalizePriceUnit(open, currency),
-        high: normalizePriceUnit(high, currency),
-        low: normalizePriceUnit(low, currency),
-        close: normalizePriceUnit(close, currency),
+        open: normalizePriceUnit(open, rawCurrency) * fxRate,
+        high: normalizePriceUnit(high, rawCurrency) * fxRate,
+        low: normalizePriceUnit(low, rawCurrency) * fxRate,
+        close: normalizePriceUnit(close, rawCurrency) * fxRate,
         volume: volumes[i] ?? 0,
       });
     }

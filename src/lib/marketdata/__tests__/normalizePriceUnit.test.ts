@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePriceUnit } from "../provider";
+import { normalizePriceUnit, getFxRate, BASE_CURRENCY } from "../provider";
 
 describe("normalizePriceUnit", () => {
   it("divides GBp (pence) values by 100 to get pounds", () => {
@@ -21,5 +21,15 @@ describe("normalizePriceUnit", () => {
 
   it("leaves the value unchanged when currency is unknown/undefined", () => {
     expect(normalizePriceUnit(100, undefined)).toBe(100);
+  });
+});
+
+describe("getFxRate", () => {
+  it("returns 1 (no conversion) for the base currency itself, without any network call", async () => {
+    expect(await getFxRate(BASE_CURRENCY)).toBe(1);
+  });
+
+  it("returns 1 (no conversion) when currency is unknown/undefined", async () => {
+    expect(await getFxRate(undefined)).toBe(1);
   });
 });
