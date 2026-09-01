@@ -80,6 +80,17 @@ export async function upsertHolding(formData: FormData): Promise<UpsertHoldingRe
   }
 }
 
+/**
+ * Deletes a holding entirely: the holdings row itself, plus that ticker's
+ * stored news headlines (otherwise they'd linger on the News screen for a
+ * ticker you no longer hold). Nothing else needs manual cleanup — the
+ * Signals screen, portfolio totals/allocation %, and the notification
+ * digest are all computed fresh from the current holdings table on every
+ * load/run, so they reflect the deletion automatically on the next read.
+ * asset_metadata (the ticker's Yahoo symbol mapping) is deliberately left
+ * in place — it's harmless reference data, useful again if you re-add the
+ * same ticker later.
+ */
 export async function deleteHolding(ticker: string): Promise<UpsertHoldingResult> {
   const user = await requireUser();
   const supabase = await createClient();
@@ -100,8 +111,13 @@ export async function deleteHolding(ticker: string): Promise<UpsertHoldingResult
       .eq("ticker", ticker);
     if (error) throw new Error(error.message);
 
+    // Best-effort: a failure here shouldn't undo the holding deletion that
+    // already succeeded, so it's not wrapped in the same throw-on-error path.
+    await supabase.from("news_items").delete().eq("ticker", ticker);
+
     revalidatePath("/holdings");
     revalidatePath("/");
+    revalidatePath("/news");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Failed to delete holding" };

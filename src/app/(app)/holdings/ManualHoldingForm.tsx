@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { upsertHolding, deleteHolding } from "./actions";
+import { upsertHolding } from "./actions";
 import TickerSearch, { type TickerPick } from "./TickerSearch";
 
 const ASSET_CLASSES: { value: string; label: string }[] = [
@@ -47,19 +47,6 @@ export default function ManualHoldingForm({ existingTickers }: { existingTickers
         setMatched(null);
       } else {
         setError(result.error ?? "Failed to save");
-      }
-    });
-  }
-
-  function handleDelete(ticker: string) {
-    setError(null);
-    setSuccess(null);
-    startTransition(async () => {
-      const result = await deleteHolding(ticker);
-      if (result.ok) {
-        setSuccess(`${ticker} removed.`);
-      } else {
-        setError(result.error ?? "Failed to delete");
       }
     });
   }
@@ -174,27 +161,8 @@ export default function ManualHoldingForm({ existingTickers }: { existingTickers
           </button>
           <p className="text-[10px] text-neutral-500">
             Saving a ticker that already exists updates it in place (same as re-entering a value after a price
-            change).
+            change). To remove a holding, use the Delete button on its card below.
           </p>
-
-          {existingTickers.length > 0 && (
-            <div className="mt-3 border-t border-neutral-200 pt-3 dark:border-neutral-800">
-              <p className="mb-1 text-xs font-medium text-neutral-600 dark:text-neutral-400">Remove a holding</p>
-              <div className="flex flex-wrap gap-1.5">
-                {existingTickers.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    disabled={pending}
-                    onClick={() => handleDelete(t)}
-                    className="rounded-lg border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:border-red-400 hover:text-red-600 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-red-700 dark:hover:text-red-400"
-                  >
-                    {t} ×
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </form>
       )}
     </div>

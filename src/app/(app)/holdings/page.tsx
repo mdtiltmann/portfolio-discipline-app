@@ -4,6 +4,7 @@ import { computeTrimAmount, DEFAULT_RISK_PROFILE } from "@/lib/engine";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
 import ManualHoldingForm from "./ManualHoldingForm";
 import HoldingEditor from "./HoldingEditor";
+import DeleteHoldingButton from "./DeleteHoldingButton";
 
 function statusColor(status: string) {
   switch (status) {
@@ -60,9 +61,12 @@ export default async function HoldingsPage() {
                 <p className="font-semibold">{holding.ticker}</p>
                 {holding.name && <p className="text-xs opacity-70">{holding.name}</p>}
               </div>
-              <span className="rounded-full bg-white/60 px-2 py-0.5 text-[10px] font-semibold dark:bg-black/20">
-                {status.status}
-              </span>
+              <div className="flex flex-col items-end gap-1">
+                <span className="rounded-full bg-white/60 px-2 py-0.5 text-[10px] font-semibold dark:bg-black/20">
+                  {status.status}
+                </span>
+                <DeleteHoldingButton ticker={holding.ticker} />
+              </div>
             </div>
 
             <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
