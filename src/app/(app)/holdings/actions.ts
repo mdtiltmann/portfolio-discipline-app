@@ -80,41 +80,6 @@ export async function upsertHolding(formData: FormData): Promise<UpsertHoldingRe
   }
 }
 
-/**
- * Updates only the cost basis for an existing holding, leaving quantity/
- * current_value untouched — the manual add-holding form only supports
- * creating new rows, so this is the safe way to fill in "what you paid"
- * for a holding you already have without risking overwriting its other
- * fields with blank/zero values.
- */
-export async function updateCostBasis(ticker: string, costBasis: number | null): Promise<UpsertHoldingResult> {
-  const user = await requireUser();
-  const supabase = await createClient();
-
-  try {
-    const { data: portfolios } = await supabase
-      .from("portfolios")
-      .select("id")
-      .eq("user_id", user.id)
-      .limit(1);
-    const portfolioId = portfolios?.[0]?.id;
-    if (!portfolioId) return { ok: false, error: "No portfolio found" };
-
-    const { error } = await supabase
-      .from("holdings")
-      .update({ cost_basis: costBasis })
-      .eq("portfolio_id", portfolioId)
-      .eq("ticker", ticker);
-    if (error) throw new Error(error.message);
-
-    revalidatePath("/holdings");
-    revalidatePath("/");
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Failed to update cost basis" };
-  }
-}
-
 export async function deleteHolding(ticker: string): Promise<UpsertHoldingResult> {
   const user = await requireUser();
   const supabase = await createClient();
